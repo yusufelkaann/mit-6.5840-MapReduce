@@ -15,7 +15,7 @@ package mr
 type TaskRequestArgs struct {
 }
 
-type ExampleReply struct {
+type TaskReply struct {
 	// id needed for lab's naming convention
 	ID         int
 	INPUTFILE  string

@@ -46,13 +46,20 @@ type ReduceTask struct {
 	startedAt time.Time
 }
 
+// Needed in rpc communcation to identify the type of task being requested by coordinator.
+type TaskType int
+
+const (
+	MapTaskType TaskType = iota
+	ReduceTaskType
+)
+
 // Your code here -- RPC handlers for the worker to call.
 
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
-func (c *Coordinator) Example(args *TaskRequestArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
+func (c *Coordinator) Example(args *TaskRequestArgs, reply *TaskReply) error {
 	return nil
 }
 
@@ -102,4 +109,52 @@ func MakeCoordinator(sockname string, files []string, nReduce int) *Coordinator 
 
 	c.server(sockname)
 	return &c
+}
+
+func (c *Coordinator) AssignTask(args *TaskRequestArgs, reply *TaskReply) error {
+
+	task := c.findMapTask()
+
+	if task != nil {
+		task.state = Started
+		task.startedAt = time.Now()
+
+		reply.ID = task.id
+		reply.INPUTFILE = task.inputFile
+		reply.REPLYSTATE = TaskAvailable
+	}
+
+	if c.isAllMapTasksFinished() {
+
+	}
+
+	return nil
+}
+
+func (c *Coordinator) findMapTask() *MapTask {
+	// Check if any task is waiting
+	for i := 0; i < len(c.mapTasks); i++ {
+		if c.mapTasks[i].state == Waiting {
+			return &c.mapTasks[i]
+		}
+	}
+
+	// Check if any task has timed out
+	for i := 0; i < len(c.mapTasks); i++ {
+		if c.mapTasks[i].state == Started &&
+			time.Since(c.mapTasks[i].startedAt) > 10*time.Second {
+			return &c.mapTasks[i]
+		}
+	}
+
+	return nil
+}
+
+func (c *Coordinator) isAllMapTasksFinished() bool {
+	for i := 0; i < len(c.mapTasks); i++ {
+		if c.mapTasks[i].state != Finished {
+			return false
+		}
+	}
+	return true
 }
