@@ -11,13 +11,23 @@ package mr
 // and reply for an RPC.
 //
 
-type ExampleArgs struct {
-	X int
+// request by the worker must me empty because the coordinator will assign a task to the worker
+type TaskRequestArgs struct {
 }
 
 type ExampleReply struct {
-	Y int
+	// id needed for lab's naming convention
+	ID         int
+	INPUTFILE  string
+	REPLYSTATE ReplyState
 }
 
-// Add your RPC definitions here.
+type ReplyState int
 
+const (
+	TaskAvailable ReplyState = iota
+	NoTaskAvailable
+	AllTasksFinished
+)
+
+// Add your RPC definitions here.
