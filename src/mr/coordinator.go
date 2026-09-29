@@ -11,22 +11,38 @@ import (
 
 type Coordinator struct {
 	// Your definitions here.
-	tasks []Task
+	mapTasks    []MapTask
+	reduceTasks []ReduceTask
 }
 
-type TaskState int
+type MapTaskState int
 
 const (
-	Waiting TaskState = iota
+	Waiting MapTaskState = iota
 	Started
 	Finished
 )
 
 // This represents a single map task (an input file to be processed)
-type Task struct {
+type MapTask struct {
 	id        int
-	state     TaskState
+	state     MapTaskState
 	inputFile string
+	startedAt time.Time
+}
+
+type ReduceTaskState int
+
+const (
+	ReduceNotReady ReduceTaskState = iota
+	ReduceWaiting
+	ReduceStarted
+	ReduceFinished
+)
+
+type ReduceTask struct {
+	id        int
+	state     ReduceTaskState
 	startedAt time.Time
 }
 
@@ -35,7 +51,7 @@ type Task struct {
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
-func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
+func (c *Coordinator) Example(args *TaskRequestArgs, reply *ExampleReply) error {
 	reply.Y = args.X + 1
 	return nil
 }
@@ -70,10 +86,17 @@ func MakeCoordinator(sockname string, files []string, nReduce int) *Coordinator 
 
 	// Your code here.
 	for index, file := range files {
-		c.tasks = append(c.tasks, Task{
+		c.mapTasks = append(c.mapTasks, MapTask{
 			id:        index,
 			state:     Waiting,
 			inputFile: file,
+		})
+	}
+
+	for i := 0; i < nReduce; i++ {
+		c.reduceTasks = append(c.reduceTasks, ReduceTask{
+			id:    i,
+			state: ReduceNotReady,
 		})
 	}
 
