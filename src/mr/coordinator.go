@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -14,6 +15,8 @@ type Coordinator struct {
 	mapTasks    []MapTask
 	reduceTasks []ReduceTask
 	phase       CoordinatorPhase
+
+	mu sync.Mutex
 }
 
 type MapTaskState int
@@ -84,6 +87,9 @@ func (c *Coordinator) server(sockname string) {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	return c.phase == FinishedPhase
 }
 
@@ -116,6 +122,9 @@ func MakeCoordinator(sockname string, files []string, nReduce int) *Coordinator 
 }
 
 func (c *Coordinator) AssignTask(args *TaskRequestArgs, reply *TaskReply) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	switch c.phase {
 	case MapPhase:
 		c.AssignMapTask(reply)
@@ -234,6 +243,9 @@ func (c *Coordinator) ReportTaskFinished(
 	args *TaskFinishedArgs,
 	reply *TaskFinishedReply,
 ) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if args.TaskType == MapTaskType {
 		for i := 0; i < len(c.mapTasks); i++ {
 			if c.mapTasks[i].id == args.ID {
