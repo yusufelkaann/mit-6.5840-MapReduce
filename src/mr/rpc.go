@@ -18,8 +18,10 @@ type TaskRequestArgs struct {
 type TaskReply struct {
 	// id needed for lab's naming convention
 	ID         int
-	INPUTFILE  string
-	REPLYSTATE ReplyState
+	InputFile  string
+	TaskType   TaskType
+	MapCount   int
+	ReplyState ReplyState
 }
 
 type ReplyState int
@@ -29,5 +31,13 @@ const (
 	NoTaskAvailable
 	AllTasksFinished
 )
+
+type TaskFinishedArgs struct {
+	ID       int
+	TaskType TaskType
+}
+
+type TaskFinishedReply struct {
+}
 
 // Add your RPC definitions here.

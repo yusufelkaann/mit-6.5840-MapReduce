@@ -13,6 +13,7 @@ type Coordinator struct {
 	// Your definitions here.
 	mapTasks    []MapTask
 	reduceTasks []ReduceTask
+	phase       CoordinatorPhase
 }
 
 type MapTaskState int
@@ -54,14 +55,19 @@ const (
 	ReduceTaskType
 )
 
+type CoordinatorPhase int
+
+const (
+	MapPhase CoordinatorPhase = iota
+	ReducePhase
+	FinishedPhase
+)
+
 // Your code here -- RPC handlers for the worker to call.
 
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
-func (c *Coordinator) Example(args *TaskRequestArgs, reply *TaskReply) error {
-	return nil
-}
 
 // start a thread that listens for RPCs from worker.go
 func (c *Coordinator) server(sockname string) {
@@ -78,18 +84,16 @@ func (c *Coordinator) server(sockname string) {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	ret := false
-
-	// Your code here.
-
-	return ret
+	return c.phase == FinishedPhase
 }
 
 // create a Coordinator.
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(sockname string, files []string, nReduce int) *Coordinator {
-	c := Coordinator{}
+	c := Coordinator{
+		phase: MapPhase,
+	}
 
 	// Your code here.
 	for index, file := range files {
@@ -112,7 +116,19 @@ func MakeCoordinator(sockname string, files []string, nReduce int) *Coordinator 
 }
 
 func (c *Coordinator) AssignTask(args *TaskRequestArgs, reply *TaskReply) error {
+	switch c.phase {
+	case MapPhase:
+		c.AssignMapTask(reply)
+	case ReducePhase:
+		c.AssignReduceTask(reply)
+	case FinishedPhase:
+		reply.ReplyState = AllTasksFinished
+	}
 
+	return nil
+}
+
+func (c *Coordinator) AssignMapTask(reply *TaskReply) {
 	task := c.findMapTask()
 
 	if task != nil {
@@ -120,17 +136,17 @@ func (c *Coordinator) AssignTask(args *TaskRequestArgs, reply *TaskReply) error 
 		task.startedAt = time.Now()
 
 		reply.ID = task.id
-		reply.INPUTFILE = task.inputFile
-		reply.REPLYSTATE = TaskAvailable
+		reply.InputFile = task.inputFile
+		reply.ReplyState = TaskAvailable
+
+		reply.TaskType = MapTaskType
+		return
 	}
 
-	if c.isAllMapTasksFinished() {
-
-	}
-
-	return nil
+	reply.ReplyState = NoTaskAvailable
 }
 
+// Helper function to find if a map task is available
 func (c *Coordinator) findMapTask() *MapTask {
 	// Check if any task is waiting
 	for i := 0; i < len(c.mapTasks); i++ {
@@ -150,6 +166,7 @@ func (c *Coordinator) findMapTask() *MapTask {
 	return nil
 }
 
+// Helper function to check if all map tasks are finished
 func (c *Coordinator) isAllMapTasksFinished() bool {
 	for i := 0; i < len(c.mapTasks); i++ {
 		if c.mapTasks[i].state != Finished {
@@ -157,4 +174,89 @@ func (c *Coordinator) isAllMapTasksFinished() bool {
 		}
 	}
 	return true
+}
+
+func (c *Coordinator) AssignReduceTask(reply *TaskReply) {
+	task := c.findReduceTask()
+
+	if task != nil {
+		task.state = ReduceStarted
+		task.startedAt = time.Now()
+
+		reply.ID = task.id
+		reply.TaskType = ReduceTaskType
+		reply.MapCount = len(c.mapTasks)
+		reply.ReplyState = TaskAvailable
+
+		return
+	}
+
+	reply.ReplyState = NoTaskAvailable
+}
+
+func (c *Coordinator) startReducePhase() {
+	c.phase = ReducePhase
+
+	for i := 0; i < len(c.reduceTasks); i++ {
+		c.reduceTasks[i].state = ReduceWaiting
+	}
+}
+
+func (c *Coordinator) findReduceTask() *ReduceTask {
+	// First check if a Reduce task is waiting
+	for i := 0; i < len(c.reduceTasks); i++ {
+		if c.reduceTasks[i].state == ReduceWaiting {
+			return &c.reduceTasks[i]
+		}
+	}
+
+	// Check if any Reduce task has timed out
+	for i := 0; i < len(c.reduceTasks); i++ {
+		if c.reduceTasks[i].state == ReduceStarted &&
+			time.Since(c.reduceTasks[i].startedAt) > 10*time.Second {
+			return &c.reduceTasks[i]
+		}
+	}
+
+	return nil
+}
+
+func (c *Coordinator) isAllReduceTasksFinished() bool {
+	for i := 0; i < len(c.reduceTasks); i++ {
+		if c.reduceTasks[i].state != ReduceFinished {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Coordinator) ReportTaskFinished(
+	args *TaskFinishedArgs,
+	reply *TaskFinishedReply,
+) error {
+	if args.TaskType == MapTaskType {
+		for i := 0; i < len(c.mapTasks); i++ {
+			if c.mapTasks[i].id == args.ID {
+				c.mapTasks[i].state = Finished
+				break
+			}
+		}
+
+		if c.isAllMapTasksFinished() {
+			c.startReducePhase()
+		}
+	} else if args.TaskType == ReduceTaskType {
+		for i := 0; i < len(c.reduceTasks); i++ {
+			if c.reduceTasks[i].id == args.ID {
+				c.reduceTasks[i].state = ReduceFinished
+				break
+			}
+		}
+
+		if c.isAllReduceTasksFinished() {
+			c.phase = FinishedPhase
+		}
+	}
+
+	return nil
 }
