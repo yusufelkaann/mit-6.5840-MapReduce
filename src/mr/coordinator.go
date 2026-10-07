@@ -122,6 +122,7 @@ func MakeCoordinator(sockname string, files []string, nReduce int) *Coordinator 
 }
 
 func (c *Coordinator) AssignTask(args *TaskRequestArgs, reply *TaskReply) error {
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
