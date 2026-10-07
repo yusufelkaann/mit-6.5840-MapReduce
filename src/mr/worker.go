@@ -1,11 +1,14 @@
 package mr
 
-import "fmt"
-import "log"
-import "net/rpc"
-import "hash/fnv"
-import "os"
-
+import (
+	"encoding/json"
+	"fmt"
+	"hash/fnv"
+	"log"
+	"net/rpc"
+	"os"
+	"time"
+)
 
 // Map functions return a slice of KeyValue.
 type KeyValue struct {
@@ -21,54 +24,109 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-var coordSockName string // socket for coordinator
+var coordSockName string
 
-
-// main/mrworker.go calls this function.
 func Worker(sockname string, mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	coordSockName = sockname
 
-	// Your worker implementation here.
+	// Our implementation will go here.
 
-	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
+	for {
+		args := TaskRequestArgs{}
+		reply := TaskReply{}
 
-}
+		if !call("Coordinator.AssignTask", &args, &reply) {
+			log.Fatalf("%d: RPC call failed", os.Getpid())
+		}
 
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-func CallExample() {
+		switch reply.ReplyState {
+		case TaskAvailable:
+			switch reply.TaskType {
+			case MapTaskType:
+				err := executeMapTask(reply, mapf)
+				if err != nil {
+					log.Fatalf("%d: failed to execute map task %d: %v", os.Getpid(), reply.ID, err)
+					continue
+				}
 
-	// declare an argument structure.
-	args := ExampleArgs{}
+				ok := reportTaskFinished(reply.ID, MapTaskType)
+				if !ok {
+					return
+				}
+			case ReduceTaskType:
+				// ---
+			}
 
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
-	ok := call("Coordinator.Example", &args, &reply)
-	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
-	} else {
-		fmt.Printf("call failed!\n")
+		case NoTaskAvailable:
+			time.Sleep(500 * time.Millisecond)
+			continue
+		case AllTasksFinished:
+			return
+		}
 	}
 }
 
-// send an RPC request to the coordinator, wait for the response.
-// usually returns true.
-// returns false if something goes wrong.
+func executeMapTask(reply TaskReply, mapf func(string, string) []KeyValue) error {
+	// read the input file
+	content, err := os.ReadFile(reply.InputFile)
+	if err != nil {
+		log.Fatalf("%d: failed to read input file %s: %v", os.Getpid(), reply.InputFile, err)
+	}
+
+	// execute the map function
+	kva := mapf(reply.InputFile, string(content))
+
+	// Create intermediate files for each reduce task
+	tempFiles := make([]*os.File, reply.ReduceCount)
+	encoders := make([]*json.Encoder, reply.ReduceCount)
+
+	for reduceId := 0; reduceId < reply.ReduceCount; reduceId++ {
+		tempFile, err := os.CreateTemp("", "mr-tmp-*")
+		if err != nil {
+			log.Fatalf("%d: failed to create temp file for reduce task %d: %v", os.Getpid(), reduceId, err)
+		}
+
+		tempFiles[reduceId] = tempFile
+		encoders[reduceId] = json.NewEncoder(tempFile)
+	}
+
+	// Partition each KeyValue into its Reduce
+	for _, kv := range kva {
+		reduceID := ihash(kv.Key) % reply.ReduceCount
+
+		if err := encoders[reduceID].Encode(&kv); err != nil {
+			log.Fatalf("%d: failed to encode KeyValue for reduce task %d: %v", os.Getpid(), reduceID, err)
+		}
+	}
+
+	for reduceID, tempFile := range tempFiles {
+		if err := tempFile.Close(); err != nil {
+			return err
+		}
+
+		finalName := fmt.Sprintf("mr-%d-%d", reply.ID, reduceID)
+		if err := os.Rename(tempFile.Name(), finalName); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func reportTaskFinished(id int, taskType TaskType) bool {
+	args := TaskFinishedArgs{
+		ID:       id,
+		TaskType: taskType,
+	}
+
+	reply := TaskFinishedReply{}
+
+	return call("Coorndinator.TaskFinished", &args, &reply)
+}
+
 func call(rpcname string, args interface{}, reply interface{}) bool {
-	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
 	c, err := rpc.DialHTTP("unix", coordSockName)
 	if err != nil {
 		log.Fatal("dialing:", err)
@@ -78,6 +136,7 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	if err := c.Call(rpcname, args, reply); err == nil {
 		return true
 	}
+
 	log.Printf("%d: call failed err %v", os.Getpid(), err)
 	return false
 }

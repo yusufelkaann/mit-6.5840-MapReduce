@@ -17,11 +17,12 @@ type TaskRequestArgs struct {
 
 type TaskReply struct {
 	// id needed for lab's naming convention
-	ID         int
-	InputFile  string
-	TaskType   TaskType
-	MapCount   int
-	ReplyState ReplyState
+	ID          int
+	InputFile   string
+	TaskType    TaskType
+	MapCount    int
+	ReduceCount int
+	ReplyState  ReplyState
 }
 
 type ReplyState int

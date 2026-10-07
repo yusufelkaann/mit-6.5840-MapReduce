@@ -147,6 +147,7 @@ func (c *Coordinator) AssignMapTask(reply *TaskReply) {
 		reply.ID = task.id
 		reply.InputFile = task.inputFile
 		reply.ReplyState = TaskAvailable
+		reply.ReduceCount = len(c.reduceTasks)
 
 		reply.TaskType = MapTaskType
 		return
